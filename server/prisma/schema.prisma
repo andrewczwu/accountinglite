@@ -39,7 +39,7 @@ model Account {
   name         String
   type         String        // Asset, Liability, Equity, Income, Expense
   subtype      String?       // Bank, Credit Card, etc.
-  balance      Float         @default(0.0)
+  balance      Decimal       @default(0.0)
   tenantId     Int
   tenant       Tenant        @relation(fields: [tenantId], references: [id])
   lines        TransactionLine[]
@@ -69,6 +69,7 @@ model Transaction {
   tenantId    Int
   tenant      Tenant             @relation(fields: [tenantId], references: [id])
   lines       TransactionLine[]
+  deletedAt   DateTime?
 }
 
 model TransactionLine {
@@ -77,5 +78,5 @@ model TransactionLine {
   transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
   accountId     Int
   account       Account     @relation(fields: [accountId], references: [id])
-  amount        Float
+  amount        Decimal
 }

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import api from '../api';
+import api, { restoreTransaction } from '../api';
 import { useParams } from 'react-router-dom';
-import { Plus, Filter, Download, ChevronDown } from 'lucide-react';
+import { Plus, Filter, Download, ChevronDown, Trash2 } from 'lucide-react';
 import { format } from 'date-fns';
 
 const AccountView = () => {
@@ -27,22 +27,30 @@ const AccountView = () => {
     const [newCategoryType, setNewCategoryType] = useState('Expense');
     const [chartOfAccounts, setChartOfAccounts] = useState([]);
     const [customers, setCustomers] = useState([]);
+    const [account, setAccount] = useState(null);
     const [payeeInput, setPayeeInput] = useState('');
+
     const [showPayeeDropdown, setShowPayeeDropdown] = useState(false);
     const [showCreateCustomerModal, setShowCreateCustomerModal] = useState(false);
     const [newCustomerData, setNewCustomerData] = useState({ name: '', isBusiness: false, firstName: '', lastName: '' });
 
+    // Undo State
+    const [deletedTransactionId, setDeletedTransactionId] = useState(null);
+    const [showUndoToast, setShowUndoToast] = useState(false);
+
     useEffect(() => {
         const fetchData = async () => {
             try {
-                const [txRes, coaRes, custRes] = await Promise.all([
+                const [txRes, coaRes, custRes, accRes] = await Promise.all([
                     api.get(`/accounts/${id}/transactions`),
                     api.get('/chart-of-accounts'),
-                    api.get('/customers')
+                    api.get('/customers'),
+                    api.get(`/accounts/${id}`)
                 ]);
                 setTransactions(txRes.data);
                 setChartOfAccounts(coaRes.data);
                 setCustomers(custRes.data);
+                setAccount(accRes.data);
 
                 // Set default category if available
                 if (coaRes.data.length > 0) {
@@ -181,9 +189,14 @@ const AccountView = () => {
             }
 
             // Refresh
-            const res = await api.get(`/accounts/${id}/transactions`);
+            const [res, accRes] = await Promise.all([
+                api.get(`/accounts/${id}/transactions`),
+                api.get(`/accounts/${id}`)
+            ]);
             setTransactions(res.data);
+            setAccount(accRes.data);
             setShowForm(false);
+
             setEditingTransaction(null);
 
             // Reset form
@@ -226,6 +239,40 @@ const AccountView = () => {
         setShowForm(true);
     };
 
+    const handleDeleteClick = async (txId) => {
+        if (!window.confirm("Are you sure you want to delete this transaction?")) return;
+        try {
+            await api.delete(`/transactions/${txId}`);
+            setTransactions(transactions.filter(t => t.id !== txId));
+            setDeletedTransactionId(txId);
+            setShowUndoToast(true);
+            setTimeout(() => setShowUndoToast(false), 5000); // Hide after 5s
+        } catch (error) {
+            console.error("Error deleting transaction:", error);
+            alert("Failed to delete transaction");
+        }
+    };
+
+    const handleUndoDelete = async () => {
+        if (!deletedTransactionId) return;
+        try {
+            await restoreTransaction(deletedTransactionId);
+            // Refresh list
+            const [res, accRes] = await Promise.all([
+                api.get(`/accounts/${id}/transactions`),
+                api.get(`/accounts/${id}`)
+            ]);
+            setTransactions(res.data);
+            setAccount(accRes.data);
+            setShowUndoToast(false);
+
+            setDeletedTransactionId(null);
+        } catch (error) {
+            console.error("Error restoring transaction:", error);
+            alert("Failed to restore transaction");
+        }
+    };
+
     const handleCancel = () => {
         setShowForm(false);
         setEditingTransaction(null);
@@ -257,10 +304,20 @@ const AccountView = () => {
     if (loading) return <div>Loading...</div>;
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-6 relative">
+            {/* Undo Toast */}
+            {showUndoToast && (
+                <div className="fixed bottom-4 right-4 bg-gray-800 text-white px-6 py-3 rounded shadow-lg flex items-center space-x-4 z-50 animate-fade-in-up">
+                    <span>Transaction deleted.</span>
+                    <button onClick={handleUndoDelete} className="text-blue-400 font-bold hover:text-blue-300">UNDO</button>
+                    <button onClick={() => setShowUndoToast(false)} className="text-gray-400 hover:text-gray-200 ml-2">x</button>
+                </div>
+            )}
+
             <div className="flex justify-between items-center">
-                <h1 className="text-2xl font-bold text-gray-900">Checking Account</h1>
+                <h1 className="text-2xl font-bold text-gray-900">{account ? account.name : 'Account'}</h1>
                 <div className="flex space-x-3">
+
                     <button className="btn-secondary flex items-center">
                         <Filter className="w-4 h-4 mr-2" /> Filter
                     </button>
@@ -508,37 +565,50 @@ const AccountView = () => {
                         </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                        {transactions.map((tx, index) => {
-                            // Calculate running balance (simplified, ideally backend handles this or we reverse calc)
-                            // For now just showing raw amounts
-                            return (
-                                <tr key={tx.id} className="hover:bg-gray-50 transition-colors">
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                        {format(new Date(tx.date), 'MMM d, yyyy')}
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap">
-                                        <div className="text-sm font-medium text-gray-900">{tx.payee}</div>
-                                        <div className="text-xs text-gray-500">{tx.description}</div>
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                        {tx.splits.length > 1 ? 'Split' : tx.splits[0]?.chartOfAccount?.name}
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium text-gray-900">
-                                        {tx.type === 'Payment' ? `$${tx.amount.toFixed(2)}` : '-'}
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium text-green-600">
-                                        {tx.type === 'Deposit' ? `$${tx.amount.toFixed(2)}` : '-'}
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-500">
-                                        - {/* Running balance needs more complex logic */}
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                        <button onClick={() => handleEditClick(tx)} className="text-indigo-600 hover:text-indigo-900">Edit</button>
-                                    </td>
-                                </tr>
-                            );
-                        })}
+                        {(() => {
+                            let currentBalance = account ? parseFloat(account.balance) : 0;
+                            return transactions.map((tx) => {
+                                const runningBalance = currentBalance;
+                                // Calculate balance for next iteration (previous transaction in time)
+                                if (tx.type === 'Deposit') {
+                                    currentBalance -= tx.amount;
+                                } else {
+                                    currentBalance += tx.amount;
+                                }
+
+                                return (
+                                    <tr key={tx.id} className="hover:bg-gray-50 transition-colors">
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                            {format(new Date(tx.date), 'MMM d, yyyy')}
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap">
+                                            <div className="text-sm font-medium text-gray-900">{tx.payee}</div>
+                                            <div className="text-xs text-gray-500">{tx.description}</div>
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                            {tx.splits.length > 1 ? 'Split' : tx.splits[0]?.chartOfAccount?.name}
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium text-gray-900">
+                                            {tx.type === 'Payment' ? `$${tx.amount.toFixed(2)}` : '-'}
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium text-green-600">
+                                            {tx.type === 'Deposit' ? `$${tx.amount.toFixed(2)}` : '-'}
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-500">
+                                            ${runningBalance.toFixed(2)}
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2">
+                                            <button onClick={() => handleEditClick(tx)} className="text-indigo-600 hover:text-indigo-900">Edit</button>
+                                            <button onClick={() => handleDeleteClick(tx.id)} className="text-red-600 hover:text-red-900">
+                                                <Trash2 className="w-4 h-4" />
+                                            </button>
+                                        </td>
+                                    </tr>
+                                );
+                            });
+                        })()}
                     </tbody>
+
                 </table>
             </div>
         </div>

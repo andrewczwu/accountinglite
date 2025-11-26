@@ -21,4 +21,9 @@ api.interceptors.request.use(async (config) => {
     return Promise.reject(error);
 });
 
+export const restoreTransaction = async (id) => {
+    const response = await api.post(`/transactions/${id}/restore`);
+    return response.data;
+};
+
 export default api;
