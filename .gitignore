@@ -35,3 +35,6 @@ yarn-error.log*
 # Prisma
 /server/prisma/*.db
 /server/prisma/*.db-journal
+
+# Firebase
+serviceAccountKey.json

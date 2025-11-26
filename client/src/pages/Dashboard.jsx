@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import axios from 'axios';
+import api from '../api';
 import { Link } from 'react-router-dom';
 import { ArrowUpRight, ArrowDownRight, Wallet, TrendingUp } from 'lucide-react';
 
@@ -11,7 +11,7 @@ const Dashboard = () => {
         const fetchAccounts = async () => {
             try {
                 // In a real app, use env var for API URL
-                const response = await axios.get('http://localhost:3001/api/accounts');
+                const response = await api.get('/accounts');
                 setAccounts(response.data);
             } catch (error) {
                 console.error('Error fetching accounts:', error);

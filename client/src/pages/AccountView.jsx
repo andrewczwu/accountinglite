@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import axios from 'axios';
+import api from '../api';
 import { useParams } from 'react-router-dom';
 import { Plus, Filter, Download, ChevronDown } from 'lucide-react';
 import { format } from 'date-fns';
@@ -9,6 +9,7 @@ const AccountView = () => {
     const [transactions, setTransactions] = useState([]);
     const [loading, setLoading] = useState(true);
     const [showForm, setShowForm] = useState(false);
+    const [editingTransaction, setEditingTransaction] = useState(null);
     const [formData, setFormData] = useState({
         date: format(new Date(), 'yyyy-MM-dd'),
         payee: '',
@@ -24,9 +25,9 @@ const AccountView = () => {
         const fetchData = async () => {
             try {
                 const [txRes, coaRes, custRes] = await Promise.all([
-                    axios.get(`http://localhost:3001/api/accounts/${id}/transactions`),
-                    axios.get('http://localhost:3001/api/chart-of-accounts'),
-                    axios.get('http://localhost:3001/api/customers')
+                    api.get(`/accounts/${id}/transactions`),
+                    api.get('/chart-of-accounts'),
+                    api.get('/customers')
                 ]);
                 setTransactions(txRes.data);
                 setChartOfAccounts(coaRes.data);
@@ -55,16 +56,54 @@ const AccountView = () => {
                 splits: [{ chartOfAccountId: chartOfAccounts[0].id, amount: formData.amount }] // Default to first category for quick add
             };
 
-            await axios.post('http://localhost:3001/api/transactions', payload);
+            if (editingTransaction) {
+                await api.put(`/transactions/${editingTransaction.id}`, payload);
+            } else {
+                await api.post('/transactions', payload);
+            }
 
             // Refresh
-            const res = await axios.get(`http://localhost:3001/api/accounts/${id}/transactions`);
+            const res = await api.get(`/accounts/${id}/transactions`);
             setTransactions(res.data);
             setShowForm(false);
-            setFormData({ ...formData, payee: '', description: '', amount: '' });
+            setEditingTransaction(null);
+            setFormData({
+                date: format(new Date(), 'yyyy-MM-dd'),
+                payee: '',
+                description: '',
+                amount: '',
+                type: 'Payment',
+                splits: []
+            });
         } catch (error) {
             console.error('Error saving transaction:', error);
         }
+    };
+
+    const handleEditClick = (tx) => {
+        setEditingTransaction(tx);
+        setFormData({
+            date: format(new Date(tx.date), 'yyyy-MM-dd'),
+            payee: tx.payee,
+            description: tx.description || '',
+            amount: tx.amount,
+            type: tx.type,
+            splits: tx.splits
+        });
+        setShowForm(true);
+    };
+
+    const handleCancel = () => {
+        setShowForm(false);
+        setEditingTransaction(null);
+        setFormData({
+            date: format(new Date(), 'yyyy-MM-dd'),
+            payee: '',
+            description: '',
+            amount: '',
+            type: 'Payment',
+            splits: []
+        });
     };
 
     if (loading) return <div>Loading...</div>;
@@ -77,7 +116,18 @@ const AccountView = () => {
                     <button className="btn-secondary flex items-center">
                         <Filter className="w-4 h-4 mr-2" /> Filter
                     </button>
-                    <button className="btn-primary flex items-center" onClick={() => setShowForm(!showForm)}>
+                    <button className="btn-primary flex items-center" onClick={() => {
+                        setEditingTransaction(null);
+                        setFormData({
+                            date: format(new Date(), 'yyyy-MM-dd'),
+                            payee: '',
+                            description: '',
+                            amount: '',
+                            type: 'Payment',
+                            splits: []
+                        });
+                        setShowForm(!showForm);
+                    }}>
                         <Plus className="w-4 h-4 mr-2" /> Add Transaction
                     </button>
                 </div>
@@ -86,7 +136,7 @@ const AccountView = () => {
             {/* Quick Add Form */}
             {showForm && (
                 <div className="card mb-6 bg-gray-50 border-green-200">
-                    <h3 className="text-sm font-semibold text-gray-700 mb-4">New Transaction</h3>
+                    <h3 className="text-sm font-semibold text-gray-700 mb-4">{editingTransaction ? 'Edit Transaction' : 'New Transaction'}</h3>
                     <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-6 gap-4 items-end">
                         <div>
                             <label className="block text-xs font-medium text-gray-500 mb-1">Date</label>
@@ -108,7 +158,8 @@ const AccountView = () => {
                             <input type="number" name="amount" value={formData.amount} onChange={handleInputChange} className="input-field" placeholder="0.00" step="0.01" required />
                         </div>
                         <div>
-                            <button type="submit" className="btn-primary w-full">Save</button>
+                            <button type="submit" className="btn-primary w-full">{editingTransaction ? 'Update' : 'Save'}</button>
+                            <button type="button" onClick={handleCancel} className="btn-secondary w-full mt-2">Cancel</button>
                         </div>
                     </form>
                 </div>
@@ -125,6 +176,7 @@ const AccountView = () => {
                             <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Payment</th>
                             <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Deposit</th>
                             <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Balance</th>
+                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                         </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
@@ -151,6 +203,9 @@ const AccountView = () => {
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-500">
                                         - {/* Running balance needs more complex logic */}
+                                    </td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                                        <button onClick={() => handleEditClick(tx)} className="text-indigo-600 hover:text-indigo-900">Edit</button>
                                     </td>
                                 </tr>
                             );

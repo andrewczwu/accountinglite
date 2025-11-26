@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import axios from 'axios';
+import api from '../api';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 
 const ReportsView = () => {
@@ -11,8 +11,8 @@ const ReportsView = () => {
         const fetchReports = async () => {
             try {
                 const [bsRes, plRes] = await Promise.all([
-                    axios.get('http://localhost:3001/api/reports/balance-sheet'),
-                    axios.get('http://localhost:3001/api/reports/profit-loss')
+                    api.get('/reports/balance-sheet'),
+                    api.get('/reports/profit-loss')
                 ]);
                 setBalanceSheet(bsRes.data);
                 setProfitLoss(plRes.data);
