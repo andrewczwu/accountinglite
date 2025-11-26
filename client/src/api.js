@@ -10,6 +10,11 @@ api.interceptors.request.use(async (config) => {
     if (user) {
         const token = await user.getIdToken();
         config.headers.Authorization = `Bearer ${token}`;
+
+        const tenantId = localStorage.getItem('currentTenantId');
+        if (tenantId) {
+            config.headers['X-Tenant-ID'] = tenantId;
+        }
     }
     return config;
 }, (error) => {

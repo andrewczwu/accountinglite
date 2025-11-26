@@ -16,10 +16,21 @@ const AccountView = () => {
         description: '',
         amount: '',
         type: 'Payment', // Payment or Deposit
+        categoryId: '',
+        customerId: null,
         splits: [] // { chartOfAccountId, amount }
     });
+    const [categoryInput, setCategoryInput] = useState('');
+    const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
+    const [showCreateCategoryModal, setShowCreateCategoryModal] = useState(false);
+    const [newCategoryName, setNewCategoryName] = useState('');
+    const [newCategoryType, setNewCategoryType] = useState('Expense');
     const [chartOfAccounts, setChartOfAccounts] = useState([]);
     const [customers, setCustomers] = useState([]);
+    const [payeeInput, setPayeeInput] = useState('');
+    const [showPayeeDropdown, setShowPayeeDropdown] = useState(false);
+    const [showCreateCustomerModal, setShowCreateCustomerModal] = useState(false);
+    const [newCustomerData, setNewCustomerData] = useState({ name: '', isBusiness: false, firstName: '', lastName: '' });
 
     useEffect(() => {
         const fetchData = async () => {
@@ -32,6 +43,12 @@ const AccountView = () => {
                 setTransactions(txRes.data);
                 setChartOfAccounts(coaRes.data);
                 setCustomers(custRes.data);
+
+                // Set default category if available
+                if (coaRes.data.length > 0) {
+                    setFormData(prev => ({ ...prev, categoryId: coaRes.data[0].id }));
+                    setCategoryInput(coaRes.data[0].name);
+                }
             } catch (error) {
                 console.error('Error fetching data:', error);
             } finally {
@@ -46,14 +63,115 @@ const AccountView = () => {
         setFormData(prev => ({ ...prev, [name]: value }));
     };
 
+    // --- Category Logic ---
+    const handleCategoryInputChange = (e) => {
+        const value = e.target.value;
+        setCategoryInput(value);
+        setShowCategoryDropdown(true);
+
+        // Check if matches existing exactly
+        const match = chartOfAccounts.find(c => c.name.toLowerCase() === value.toLowerCase());
+        if (match) {
+            setFormData(prev => ({ ...prev, categoryId: match.id }));
+        } else {
+            setFormData(prev => ({ ...prev, categoryId: '' }));
+        }
+    };
+
+    const selectCategory = (cat) => {
+        setCategoryInput(cat.name);
+        setFormData(prev => ({ ...prev, categoryId: cat.id }));
+        setShowCategoryDropdown(false);
+    };
+
+    const initiateCreateCategory = () => {
+        setNewCategoryName(categoryInput);
+        // Default type based on transaction type
+        setNewCategoryType(formData.type === 'Deposit' ? 'Income' : 'Expense');
+        setShowCreateCategoryModal(true);
+        setShowCategoryDropdown(false);
+    };
+
+    const handleCreateCategory = async (e) => {
+        e.preventDefault();
+        try {
+            const res = await api.post('/chart-of-accounts', { name: newCategoryName, type: newCategoryType });
+            const newCat = res.data;
+            setChartOfAccounts([...chartOfAccounts, newCat]);
+            selectCategory(newCat);
+            setShowCreateCategoryModal(false);
+        } catch (error) {
+            console.error("Error creating category:", error);
+            alert("Failed to create category");
+        }
+    };
+
+    // --- Payee/Customer Logic ---
+    const handlePayeeInputChange = (e) => {
+        const value = e.target.value;
+        setPayeeInput(value);
+        setFormData(prev => ({ ...prev, payee: value })); // Also update payee text
+        setShowPayeeDropdown(true);
+
+        const match = customers.find(c => c.name.toLowerCase() === value.toLowerCase());
+        if (match) {
+            setFormData(prev => ({ ...prev, customerId: match.id }));
+        } else {
+            setFormData(prev => ({ ...prev, customerId: null }));
+        }
+    };
+
+    const selectCustomer = (cust) => {
+        setPayeeInput(cust.name);
+        setFormData(prev => ({ ...prev, payee: cust.name, customerId: cust.id }));
+        setShowPayeeDropdown(false);
+    };
+
+    const initiateCreateCustomer = () => {
+        // Guess if it's a business or person based on spaces? Or just default to Business for quick add.
+        // Let's default to Business for simplicity in quick add, or show modal.
+        // User asked: "If you specify a customer that doesn't exist, you can create the customer there."
+        setNewCustomerData({ name: payeeInput, isBusiness: true, firstName: '', lastName: '' });
+        setShowCreateCustomerModal(true);
+        setShowPayeeDropdown(false);
+    };
+
+    const handleCreateCustomer = async (e) => {
+        e.preventDefault();
+        try {
+            const payload = { ...newCustomerData };
+            if (payload.isBusiness) {
+                payload.firstName = '';
+                payload.lastName = '';
+            } else {
+                payload.name = '';
+            }
+            const res = await api.post('/customers', payload);
+            const newCust = res.data;
+            setCustomers([...customers, newCust]);
+            selectCustomer(newCust);
+            setShowCreateCustomerModal(false);
+        } catch (error) {
+            console.error("Error creating customer:", error);
+            alert("Failed to create customer");
+        }
+    };
+
+
     const handleSubmit = async (e) => {
         e.preventDefault();
+
+        if (!formData.categoryId) {
+            alert("Please select or create a valid category.");
+            return;
+        }
+
         try {
             // Simple single category for now, splits logic to be added in modal
             const payload = {
                 ...formData,
                 accountId: id,
-                splits: [{ chartOfAccountId: chartOfAccounts[0].id, amount: formData.amount }] // Default to first category for quick add
+                splits: [{ chartOfAccountId: formData.categoryId, amount: formData.amount }]
             };
 
             if (editingTransaction) {
@@ -67,14 +185,22 @@ const AccountView = () => {
             setTransactions(res.data);
             setShowForm(false);
             setEditingTransaction(null);
+
+            // Reset form
+            const defaultCat = chartOfAccounts.length > 0 ? chartOfAccounts[0] : null;
             setFormData({
                 date: format(new Date(), 'yyyy-MM-dd'),
                 payee: '',
                 description: '',
                 amount: '',
                 type: 'Payment',
+                categoryId: defaultCat ? defaultCat.id : '',
+                customerId: null,
                 splits: []
             });
+            setCategoryInput(defaultCat ? defaultCat.name : '');
+            setPayeeInput('');
+
         } catch (error) {
             console.error('Error saving transaction:', error);
         }
@@ -82,29 +208,51 @@ const AccountView = () => {
 
     const handleEditClick = (tx) => {
         setEditingTransaction(tx);
+        const catId = tx.splits[0]?.chartOfAccountId;
+        const cat = chartOfAccounts.find(c => c.id === catId);
+
         setFormData({
             date: format(new Date(tx.date), 'yyyy-MM-dd'),
             payee: tx.payee,
             description: tx.description || '',
             amount: tx.amount,
             type: tx.type,
+            categoryId: catId || '',
+            customerId: tx.customerId || null,
             splits: tx.splits
         });
+        setCategoryInput(cat ? cat.name : '');
+        setPayeeInput(tx.payee);
         setShowForm(true);
     };
 
     const handleCancel = () => {
         setShowForm(false);
         setEditingTransaction(null);
+        const defaultCat = chartOfAccounts.length > 0 ? chartOfAccounts[0] : null;
         setFormData({
             date: format(new Date(), 'yyyy-MM-dd'),
             payee: '',
             description: '',
             amount: '',
             type: 'Payment',
+            categoryId: defaultCat ? defaultCat.id : '',
+            customerId: null,
             splits: []
         });
+        setCategoryInput(defaultCat ? defaultCat.name : '');
+        setPayeeInput('');
     };
+
+    // Filter categories for dropdown
+    const filteredCategories = chartOfAccounts.filter(c =>
+        c.name.toLowerCase().includes(categoryInput.toLowerCase())
+    );
+
+    // Filter customers
+    const filteredCustomers = customers.filter(c =>
+        c.name.toLowerCase().includes(payeeInput.toLowerCase())
+    );
 
     if (loading) return <div>Loading...</div>;
 
@@ -118,14 +266,19 @@ const AccountView = () => {
                     </button>
                     <button className="btn-primary flex items-center" onClick={() => {
                         setEditingTransaction(null);
+                        const defaultCat = chartOfAccounts.length > 0 ? chartOfAccounts[0] : null;
                         setFormData({
                             date: format(new Date(), 'yyyy-MM-dd'),
                             payee: '',
                             description: '',
                             amount: '',
                             type: 'Payment',
+                            categoryId: defaultCat ? defaultCat.id : '',
+                            customerId: null,
                             splits: []
                         });
+                        setCategoryInput(defaultCat ? defaultCat.name : '');
+                        setPayeeInput('');
                         setShowForm(!showForm);
                     }}>
                         <Plus className="w-4 h-4 mr-2" /> Add Transaction
@@ -135,16 +288,46 @@ const AccountView = () => {
 
             {/* Quick Add Form */}
             {showForm && (
-                <div className="card mb-6 bg-gray-50 border-green-200">
+                <div className="card mb-6 bg-gray-50 border-green-200 relative">
                     <h3 className="text-sm font-semibold text-gray-700 mb-4">{editingTransaction ? 'Edit Transaction' : 'New Transaction'}</h3>
                     <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-6 gap-4 items-end">
                         <div>
                             <label className="block text-xs font-medium text-gray-500 mb-1">Date</label>
                             <input type="date" name="date" value={formData.date} onChange={handleInputChange} className="input-field" required />
                         </div>
-                        <div className="md:col-span-2">
-                            <label className="block text-xs font-medium text-gray-500 mb-1">Payee</label>
-                            <input type="text" name="payee" value={formData.payee} onChange={handleInputChange} className="input-field" placeholder="e.g. Walmart" required />
+                        <div className="md:col-span-2 relative">
+                            <label className="block text-xs font-medium text-gray-500 mb-1">Payee / Customer</label>
+                            <input
+                                type="text"
+                                value={payeeInput}
+                                onChange={handlePayeeInputChange}
+                                onFocus={() => setShowPayeeDropdown(true)}
+                                onBlur={() => setTimeout(() => setShowPayeeDropdown(false), 200)}
+                                className="input-field w-full"
+                                placeholder="Select or type..."
+                                required
+                            />
+                            {showPayeeDropdown && (
+                                <div className="absolute z-10 w-full bg-white border border-gray-200 rounded-md shadow-lg max-h-48 overflow-auto mt-1">
+                                    {filteredCustomers.map(cust => (
+                                        <div
+                                            key={cust.id}
+                                            className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-sm"
+                                            onClick={() => selectCustomer(cust)}
+                                        >
+                                            {cust.name}
+                                        </div>
+                                    ))}
+                                    {filteredCustomers.length === 0 && payeeInput && (
+                                        <div
+                                            className="px-4 py-2 hover:bg-blue-50 cursor-pointer text-sm text-blue-600 font-medium"
+                                            onClick={initiateCreateCustomer}
+                                        >
+                                            + Create "{payeeInput}"
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                         </div>
                         <div>
                             <label className="block text-xs font-medium text-gray-500 mb-1">Type</label>
@@ -152,6 +335,40 @@ const AccountView = () => {
                                 <option value="Payment">Payment</option>
                                 <option value="Deposit">Deposit</option>
                             </select>
+                        </div>
+                        <div className="relative">
+                            <label className="block text-xs font-medium text-gray-500 mb-1">Category</label>
+                            <input
+                                type="text"
+                                value={categoryInput}
+                                onChange={handleCategoryInputChange}
+                                onFocus={() => setShowCategoryDropdown(true)}
+                                onBlur={() => setTimeout(() => setShowCategoryDropdown(false), 200)} // Delay to allow click
+                                className="input-field w-full"
+                                placeholder="Select or type..."
+                                required
+                            />
+                            {showCategoryDropdown && (
+                                <div className="absolute z-10 w-full bg-white border border-gray-200 rounded-md shadow-lg max-h-48 overflow-auto mt-1">
+                                    {filteredCategories.map(cat => (
+                                        <div
+                                            key={cat.id}
+                                            className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-sm"
+                                            onClick={() => selectCategory(cat)}
+                                        >
+                                            {cat.name}
+                                        </div>
+                                    ))}
+                                    {filteredCategories.length === 0 && categoryInput && (
+                                        <div
+                                            className="px-4 py-2 hover:bg-blue-50 cursor-pointer text-sm text-blue-600 font-medium"
+                                            onClick={initiateCreateCategory}
+                                        >
+                                            + Create "{categoryInput}"
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                         </div>
                         <div>
                             <label className="block text-xs font-medium text-gray-500 mb-1">Amount</label>
@@ -162,6 +379,117 @@ const AccountView = () => {
                             <button type="button" onClick={handleCancel} className="btn-secondary w-full mt-2">Cancel</button>
                         </div>
                     </form>
+                </div>
+            )}
+
+            {/* Create Category Modal */}
+            {showCreateCategoryModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                    <div className="bg-white rounded-lg shadow-xl max-w-sm w-full p-6">
+                        <h2 className="text-lg font-bold mb-4">Create New Category</h2>
+                        <form onSubmit={handleCreateCategory} className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                                <input
+                                    type="text"
+                                    value={newCategoryName}
+                                    onChange={(e) => setNewCategoryName(e.target.value)}
+                                    className="input-field w-full"
+                                    required
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
+                                <select
+                                    value={newCategoryType}
+                                    onChange={(e) => setNewCategoryType(e.target.value)}
+                                    className="input-field w-full"
+                                >
+                                    <option value="Income">Income</option>
+                                    <option value="Expense">Expense</option>
+                                    <option value="Equity">Equity</option>
+                                    <option value="Liability">Liability</option>
+                                    <option value="Asset">Asset</option>
+                                </select>
+                            </div>
+                            <div className="flex justify-end space-x-3 mt-6">
+                                <button type="button" onClick={() => setShowCreateCategoryModal(false)} className="btn-secondary">Cancel</button>
+                                <button type="submit" className="btn-primary">Create</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Create Customer Modal */}
+            {showCreateCustomerModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+                    <div className="bg-white rounded-lg shadow-xl max-w-sm w-full p-6">
+                        <h2 className="text-lg font-bold mb-4">Create New Customer</h2>
+                        <form onSubmit={handleCreateCustomer} className="space-y-4">
+                            <div className="flex space-x-4 mb-4">
+                                <label className="flex items-center space-x-2 cursor-pointer">
+                                    <input
+                                        type="radio"
+                                        checked={!newCustomerData.isBusiness}
+                                        onChange={() => setNewCustomerData({ ...newCustomerData, isBusiness: false })}
+                                        className="text-green-600 focus:ring-green-500"
+                                    />
+                                    <span className="text-sm font-medium text-gray-700">Individual</span>
+                                </label>
+                                <label className="flex items-center space-x-2 cursor-pointer">
+                                    <input
+                                        type="radio"
+                                        checked={newCustomerData.isBusiness}
+                                        onChange={() => setNewCustomerData({ ...newCustomerData, isBusiness: true })}
+                                        className="text-green-600 focus:ring-green-500"
+                                    />
+                                    <span className="text-sm font-medium text-gray-700">Business</span>
+                                </label>
+                            </div>
+
+                            {newCustomerData.isBusiness ? (
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Business Name</label>
+                                    <input
+                                        type="text"
+                                        value={newCustomerData.name}
+                                        onChange={(e) => setNewCustomerData({ ...newCustomerData, name: e.target.value })}
+                                        className="input-field w-full"
+                                        required
+                                    />
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">First Name</label>
+                                        <input
+                                            type="text"
+                                            value={newCustomerData.firstName}
+                                            onChange={(e) => setNewCustomerData({ ...newCustomerData, firstName: e.target.value })}
+                                            className="input-field w-full"
+                                            required
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Last Name</label>
+                                        <input
+                                            type="text"
+                                            value={newCustomerData.lastName}
+                                            onChange={(e) => setNewCustomerData({ ...newCustomerData, lastName: e.target.value })}
+                                            className="input-field w-full"
+                                            required
+                                        />
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="flex justify-end space-x-3 mt-6">
+                                <button type="button" onClick={() => setShowCreateCustomerModal(false)} className="btn-secondary">Cancel</button>
+                                <button type="submit" className="btn-primary">Create</button>
+                            </div>
+                        </form>
+                    </div>
                 </div>
             )}
 

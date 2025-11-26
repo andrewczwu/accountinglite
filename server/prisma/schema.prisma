@@ -7,27 +7,55 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model User {
+  id          Int          @id @default(autoincrement())
+  firebaseUid String       @unique
+  email       String       @unique
+  tenants     UserTenant[]
+}
+
+model Tenant {
+  id              Int              @id @default(autoincrement())
+  name            String
+  users           UserTenant[]
+  accounts        Account[]
+  customers       Customer[]
+  transactions    Transaction[]
+}
+
+model UserTenant {
+  id       Int    @id @default(autoincrement())
+  userId   Int
+  user     User   @relation(fields: [userId], references: [id])
+  tenantId Int
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+  role     String // 'ADMIN', 'USER'
+
+  @@unique([userId, tenantId])
+}
+
 model Account {
   id           Int           @id @default(autoincrement())
   name         String
-  type         String        // Bank, Credit Card
+  type         String        // Asset, Liability, Equity, Income, Expense
+  subtype      String?       // Bank, Credit Card, etc.
   balance      Float         @default(0.0)
-  transactions Transaction[]
-}
-
-model ChartOfAccount {
-  id                Int                @id @default(autoincrement())
-  name              String
-  type              String             // Income, Expense, Asset, Liability, Equity
-  transactionSplits TransactionSplit[]
+  tenantId     Int
+  tenant       Tenant        @relation(fields: [tenantId], references: [id])
+  lines        TransactionLine[]
 }
 
 model Customer {
   id           Int           @id @default(autoincrement())
   name         String
+  firstName    String?
+  lastName     String?
+  isBusiness   Boolean       @default(false)
   email        String?
   phone        String?
   address      String?
+  tenantId     Int
+  tenant       Tenant        @relation(fields: [tenantId], references: [id])
   transactions Transaction[]
 }
 
@@ -36,20 +64,18 @@ model Transaction {
   date        DateTime
   payee       String
   description String?
-  amount      Float
-  type        String             // Payment, Deposit
-  accountId   Int
-  account     Account            @relation(fields: [accountId], references: [id])
   customerId  Int?
   customer    Customer?          @relation(fields: [customerId], references: [id])
-  splits      TransactionSplit[]
+  tenantId    Int
+  tenant      Tenant             @relation(fields: [tenantId], references: [id])
+  lines       TransactionLine[]
 }
 
-model TransactionSplit {
-  id               Int            @id @default(autoincrement())
-  transactionId    Int
-  transaction      Transaction    @relation(fields: [transactionId], references: [id])
-  chartOfAccountId Int
-  chartOfAccount   ChartOfAccount @relation(fields: [chartOfAccountId], references: [id])
-  amount           Float
+model TransactionLine {
+  id            Int         @id @default(autoincrement())
+  transactionId Int
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  accountId     Int
+  account       Account     @relation(fields: [accountId], references: [id])
+  amount        Float
 }

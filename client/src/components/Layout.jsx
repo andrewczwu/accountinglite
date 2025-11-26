@@ -1,17 +1,31 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, CreditCard, Users, PieChart, FileText, Plus, LogOut } from 'lucide-react';
+import { LayoutDashboard, CreditCard, Users, PieChart, FileText, Plus, LogOut, Building, Settings } from 'lucide-react';
+import { useTenant } from '../context/TenantContext';
+import { useAuth } from '../context/AuthContext';
 
 const Layout = ({ children }) => {
     const location = useLocation();
+    const { currentTenant, switchTenant } = useTenant();
+    const { logout } = useAuth();
 
     const navItems = [
         { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
         { icon: CreditCard, label: 'Banking', path: '/banking' },
-        { icon: Users, label: 'Sales', path: '/customers' },
+        { icon: Users, label: 'Customers', path: '/customers' },
         { icon: PieChart, label: 'Expenses', path: '/expenses' },
         { icon: FileText, label: 'Reports', path: '/reports' },
+        { icon: PieChart, label: 'Categories', path: '/categories' },
+        { icon: Settings, label: 'Team', path: '/users' },
     ];
+
+    const handleLogout = async () => {
+        try {
+            await logout();
+        } catch (error) {
+            console.error("Failed to log out", error);
+        }
+    };
 
     return (
         <div className="flex h-screen bg-gray-50">
@@ -19,6 +33,12 @@ const Layout = ({ children }) => {
             <aside className="w-64 bg-white border-r border-gray-200 flex flex-col">
                 <div className="p-6 border-b border-gray-200">
                     <h1 className="text-2xl font-bold text-green-700">QuickBooks<span className="text-gray-500 text-sm ml-1">Clone</span></h1>
+                    {currentTenant && (
+                        <div className="mt-2 text-sm text-gray-600 flex items-center">
+                            <Building className="w-4 h-4 mr-1" />
+                            {currentTenant.name}
+                        </div>
+                    )}
                 </div>
 
                 <nav className="flex-1 p-4 space-y-1">
@@ -30,8 +50,8 @@ const Layout = ({ children }) => {
                                 key={item.path}
                                 to={item.path}
                                 className={`flex items-center px-4 py-3 rounded-md transition-colors ${isActive
-                                        ? 'bg-green-50 text-green-700 font-medium'
-                                        : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                                    ? 'bg-green-50 text-green-700 font-medium'
+                                    : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
                                     }`}
                             >
                                 <Icon className={`w-5 h-5 mr-3 ${isActive ? 'text-green-600' : 'text-gray-400'}`} />
@@ -41,8 +61,22 @@ const Layout = ({ children }) => {
                     })}
                 </nav>
 
-                <div className="p-4 border-t border-gray-200">
-                    <button className="flex items-center w-full px-4 py-2 text-sm text-gray-600 hover:text-red-600 transition-colors">
+                <div className="p-4 border-t border-gray-200 space-y-2">
+                    <button
+                        onClick={() => {
+                            switchTenant(null); // Or just clear storage and reload
+                            localStorage.removeItem('currentTenantId');
+                            window.location.reload();
+                        }}
+                        className="flex items-center w-full px-4 py-2 text-sm text-blue-600 hover:text-blue-800 transition-colors"
+                    >
+                        <Building className="w-4 h-4 mr-2" />
+                        Switch Org
+                    </button>
+                    <button
+                        onClick={handleLogout}
+                        className="flex items-center w-full px-4 py-2 text-sm text-gray-600 hover:text-red-600 transition-colors"
+                    >
                         <LogOut className="w-4 h-4 mr-2" />
                         Sign Out
                     </button>
