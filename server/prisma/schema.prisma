@@ -1,0 +1,55 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Account {
+  id           Int           @id @default(autoincrement())
+  name         String
+  type         String        // Bank, Credit Card
+  balance      Float         @default(0.0)
+  transactions Transaction[]
+}
+
+model ChartOfAccount {
+  id                Int                @id @default(autoincrement())
+  name              String
+  type              String             // Income, Expense, Asset, Liability, Equity
+  transactionSplits TransactionSplit[]
+}
+
+model Customer {
+  id           Int           @id @default(autoincrement())
+  name         String
+  email        String?
+  phone        String?
+  address      String?
+  transactions Transaction[]
+}
+
+model Transaction {
+  id          Int                @id @default(autoincrement())
+  date        DateTime
+  payee       String
+  description String?
+  amount      Float
+  type        String             // Payment, Deposit
+  accountId   Int
+  account     Account            @relation(fields: [accountId], references: [id])
+  customerId  Int?
+  customer    Customer?          @relation(fields: [customerId], references: [id])
+  splits      TransactionSplit[]
+}
+
+model TransactionSplit {
+  id               Int            @id @default(autoincrement())
+  transactionId    Int
+  transaction      Transaction    @relation(fields: [transactionId], references: [id])
+  chartOfAccountId Int
+  chartOfAccount   ChartOfAccount @relation(fields: [chartOfAccountId], references: [id])
+  amount           Float
+}
