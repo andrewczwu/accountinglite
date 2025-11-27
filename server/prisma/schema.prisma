@@ -70,6 +70,8 @@ model Transaction {
   tenant      Tenant             @relation(fields: [tenantId], references: [id])
   lines       TransactionLine[]
   deletedAt   DateTime?
+  createdAt   DateTime           @default(now())
+  sequence    Int                @default(0)
 }
 
 model TransactionLine {

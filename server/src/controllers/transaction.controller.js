@@ -25,7 +25,7 @@ const getTransactions = async (req, res) => {
             lines: { include: { account: true } },
             customer: true,
         },
-        orderBy: [{ date: 'desc' }, { id: 'desc' }],
+        orderBy: [{ date: 'desc' }, { sequence: 'desc' }, { id: 'desc' }],
     });
 
     const transformed = transactions.map(tx => {
@@ -46,6 +46,7 @@ const getTransactions = async (req, res) => {
         return {
             id: tx.id,
             date: tx.date,
+            sequence: tx.sequence,
             payee: tx.payee,
             description: tx.description,
             amount: Math.abs(mainAmountVal),
@@ -80,9 +81,20 @@ const createTransaction = async (req, res) => {
 
     try {
         const result = await prisma.$transaction(async (prisma) => {
+            // Get max sequence for this date
+            const maxSeq = await prisma.transaction.aggregate({
+                where: {
+                    tenantId: req.tenantId,
+                    date: new Date(date)
+                },
+                _max: { sequence: true }
+            });
+            const nextSeq = (maxSeq._max.sequence || 0) + 1;
+
             const transaction = await prisma.transaction.create({
                 data: {
                     date: new Date(date),
+                    sequence: nextSeq,
                     payee,
                     description,
                     customerId: customerId ? parseInt(customerId) : null,
@@ -264,10 +276,73 @@ const restoreTransaction = async (req, res) => {
     }
 };
 
+const reorderTransaction = async (req, res) => {
+    if (!req.tenantId) return res.status(400).json({ error: 'Tenant ID required' });
+    const { id } = req.params;
+    const { newDate, newIndex } = req.body; // newIndex is the position in the list for that date
+
+    try {
+        await prisma.$transaction(async (prisma) => {
+            const transaction = await prisma.transaction.findFirst({
+                where: { id: parseInt(id), tenantId: req.tenantId }
+            });
+
+            if (!transaction) throw new Error('Transaction not found');
+
+            const targetDate = new Date(newDate);
+
+            // 1. Update the transaction's date (if changed)
+            // We temporarily set sequence to -1 to avoid conflicts during reordering, or just leave it.
+            await prisma.transaction.update({
+                where: { id: parseInt(id) },
+                data: { date: targetDate }
+            });
+
+            // 2. Fetch all transactions for the target date
+            const transactionsOnDate = await prisma.transaction.findMany({
+                where: {
+                    tenantId: req.tenantId,
+                    date: targetDate,
+                    deletedAt: null
+                },
+                orderBy: [{ sequence: 'asc' }, { id: 'asc' }]
+            });
+
+            // 3. Construct the new order locally
+            // Remove the moved transaction from the list (it might be there if date didn't change)
+            const otherTxs = transactionsOnDate.filter(t => t.id !== parseInt(id));
+
+            // Insert at newIndex
+            // Clamp index
+            const insertIndex = Math.max(0, Math.min(newIndex, otherTxs.length));
+            const newOrder = [
+                ...otherTxs.slice(0, insertIndex),
+                { id: parseInt(id) }, // The moved transaction
+                ...otherTxs.slice(insertIndex)
+            ];
+
+            // 4. Update sequences for all
+            for (let i = 0; i < newOrder.length; i++) {
+                await prisma.transaction.update({
+                    where: { id: newOrder[i].id },
+                    data: { sequence: i }
+                });
+            }
+        });
+
+        res.json({ message: 'Transaction reordered' });
+    } catch (error) {
+        console.error(error);
+        if (error.message === 'Transaction not found') return res.status(404).json({ error: 'Transaction not found' });
+        res.status(500).json({ error: 'Failed to reorder transaction' });
+    }
+};
+
 module.exports = {
     getTransactions,
     createTransaction,
     updateTransaction,
     deleteTransaction,
-    restoreTransaction
+    restoreTransaction,
+    reorderTransaction
 };

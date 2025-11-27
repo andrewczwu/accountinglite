@@ -6,5 +6,6 @@ router.post('/', controller.createTransaction);
 router.put('/:id', controller.updateTransaction);
 router.delete('/:id', controller.deleteTransaction);
 router.post('/:id/restore', controller.restoreTransaction);
+router.put('/:id/reorder', controller.reorderTransaction);
 
 module.exports = router;

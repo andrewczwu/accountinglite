@@ -1,8 +1,79 @@
 import React, { useEffect, useState } from 'react';
 import api, { restoreTransaction } from '../api';
 import { useParams } from 'react-router-dom';
-import { Plus, Filter, Download, ChevronDown, Trash2 } from 'lucide-react';
+import { Plus, Filter, Download, ChevronDown, ChevronUp, Trash2, GripVertical } from 'lucide-react';
 import { format } from 'date-fns';
+import {
+    DndContext,
+    closestCenter,
+    KeyboardSensor,
+    PointerSensor,
+    useSensor,
+    useSensors,
+} from '@dnd-kit/core';
+import {
+    arrayMove,
+    SortableContext,
+    sortableKeyboardCoordinates,
+    verticalListSortingStrategy,
+    useSortable,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+
+const SortableRow = ({ transaction, runningBalance, onEdit, onDelete }) => {
+    const {
+        attributes,
+        listeners,
+        setNodeRef,
+        transform,
+        transition,
+        isDragging,
+    } = useSortable({ id: transaction.id });
+
+    const style = {
+        transform: CSS.Transform.toString(transform),
+        transition,
+        zIndex: isDragging ? 10 : 'auto',
+        position: 'relative',
+    };
+
+    return (
+        <tr
+            ref={setNodeRef}
+            style={style}
+            className={`hover:bg-gray-50 transition-colors ${isDragging ? 'bg-gray-100 shadow-md' : ''}`}
+        >
+            <td className="px-2 py-4 whitespace-nowrap text-gray-400 cursor-grab active:cursor-grabbing" {...attributes} {...listeners}>
+                <GripVertical className="w-4 h-4" />
+            </td>
+            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                {format(new Date(transaction.date.replace('Z', '')), 'MMM d, yyyy')}
+            </td>
+            <td className="px-6 py-4 whitespace-nowrap">
+                <div className="text-sm font-medium text-gray-900">{transaction.payee}</div>
+                <div className="text-xs text-gray-500">{transaction.description}</div>
+            </td>
+            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                {transaction.splits.length > 1 ? 'Split' : transaction.splits[0]?.chartOfAccount?.name}
+            </td>
+            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium text-gray-900">
+                {transaction.type === 'Payment' ? `$${transaction.amount.toFixed(2)}` : '-'}
+            </td>
+            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium text-green-600">
+                {transaction.type === 'Deposit' ? `$${transaction.amount.toFixed(2)}` : '-'}
+            </td>
+            <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-500">
+                ${runningBalance.toFixed(2)}
+            </td>
+            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2">
+                <button onClick={() => onEdit(transaction)} className="text-indigo-600 hover:text-indigo-900">Edit</button>
+                <button onClick={() => onDelete(transaction.id)} className="text-red-600 hover:text-red-900">
+                    <Trash2 className="w-4 h-4" />
+                </button>
+            </td>
+        </tr>
+    );
+};
 
 const AccountView = () => {
     const { id } = useParams();
@@ -33,36 +104,46 @@ const AccountView = () => {
     const [showPayeeDropdown, setShowPayeeDropdown] = useState(false);
     const [showCreateCustomerModal, setShowCreateCustomerModal] = useState(false);
     const [newCustomerData, setNewCustomerData] = useState({ name: '', isBusiness: false, firstName: '', lastName: '' });
+    const [sortOrder, setSortOrder] = useState('asc'); // Default to 'asc' (Oldest First)
 
     // Undo State
     const [deletedTransactionId, setDeletedTransactionId] = useState(null);
     const [showUndoToast, setShowUndoToast] = useState(false);
 
-    useEffect(() => {
-        const fetchData = async () => {
-            try {
-                const [txRes, coaRes, custRes, accRes] = await Promise.all([
-                    api.get(`/accounts/${id}/transactions`),
-                    api.get('/chart-of-accounts'),
-                    api.get('/customers'),
-                    api.get(`/accounts/${id}`)
-                ]);
-                setTransactions(txRes.data);
-                setChartOfAccounts(coaRes.data);
-                setCustomers(custRes.data);
-                setAccount(accRes.data);
+    const sensors = useSensors(
+        useSensor(PointerSensor),
+        useSensor(KeyboardSensor, {
+            coordinateGetter: sortableKeyboardCoordinates,
+        })
+    );
 
-                // Set default category if available
-                if (coaRes.data.length > 0) {
-                    setFormData(prev => ({ ...prev, categoryId: coaRes.data[0].id }));
-                    setCategoryInput(coaRes.data[0].name);
-                }
-            } catch (error) {
-                console.error('Error fetching data:', error);
-            } finally {
-                setLoading(false);
+    const fetchData = async () => {
+        try {
+            const [txRes, coaRes, custRes, accRes] = await Promise.all([
+                api.get(`/accounts/${id}/transactions`),
+                api.get('/chart-of-accounts'),
+                api.get('/customers'),
+                api.get(`/accounts/${id}`)
+            ]);
+            setTransactions(txRes.data);
+            setChartOfAccounts(coaRes.data);
+            setCustomers(custRes.data);
+            setAccount(accRes.data);
+
+            // Set default category if available (exclude current account)
+            const availableCats = coaRes.data.filter(c => c.id !== parseInt(id));
+            if (availableCats.length > 0) {
+                setFormData(prev => ({ ...prev, categoryId: availableCats[0].id }));
+                setCategoryInput(availableCats[0].name);
             }
-        };
+        } catch (error) {
+            console.error('Error fetching data:', error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
         fetchData();
     }, [id]);
 
@@ -77,8 +158,8 @@ const AccountView = () => {
         setCategoryInput(value);
         setShowCategoryDropdown(true);
 
-        // Check if matches existing exactly
-        const match = chartOfAccounts.find(c => c.name.toLowerCase() === value.toLowerCase());
+        // Check if matches existing exactly (exclude current account)
+        const match = chartOfAccounts.find(c => c.name.toLowerCase() === value.toLowerCase() && c.id !== parseInt(id));
         if (match) {
             setFormData(prev => ({ ...prev, categoryId: match.id }));
         } else {
@@ -136,9 +217,6 @@ const AccountView = () => {
     };
 
     const initiateCreateCustomer = () => {
-        // Guess if it's a business or person based on spaces? Or just default to Business for quick add.
-        // Let's default to Business for simplicity in quick add, or show modal.
-        // User asked: "If you specify a customer that doesn't exist, you can create the customer there."
         setNewCustomerData({ name: payeeInput, isBusiness: true, firstName: '', lastName: '' });
         setShowCreateCustomerModal(true);
         setShowPayeeDropdown(false);
@@ -189,18 +267,13 @@ const AccountView = () => {
             }
 
             // Refresh
-            const [res, accRes] = await Promise.all([
-                api.get(`/accounts/${id}/transactions`),
-                api.get(`/accounts/${id}`)
-            ]);
-            setTransactions(res.data);
-            setAccount(accRes.data);
+            fetchData();
             setShowForm(false);
-
             setEditingTransaction(null);
 
             // Reset form
-            const defaultCat = chartOfAccounts.length > 0 ? chartOfAccounts[0] : null;
+            const availableCats = chartOfAccounts.filter(c => c.id !== parseInt(id));
+            const defaultCat = availableCats.length > 0 ? availableCats[0] : null;
             setFormData({
                 date: format(new Date(), 'yyyy-MM-dd'),
                 payee: '',
@@ -225,7 +298,7 @@ const AccountView = () => {
         const cat = chartOfAccounts.find(c => c.id === catId);
 
         setFormData({
-            date: format(new Date(tx.date), 'yyyy-MM-dd'),
+            date: tx.date.split('T')[0], // Use the date part directly, ignoring timezone
             payee: tx.payee,
             description: tx.description || '',
             amount: tx.amount,
@@ -257,15 +330,8 @@ const AccountView = () => {
         if (!deletedTransactionId) return;
         try {
             await restoreTransaction(deletedTransactionId);
-            // Refresh list
-            const [res, accRes] = await Promise.all([
-                api.get(`/accounts/${id}/transactions`),
-                api.get(`/accounts/${id}`)
-            ]);
-            setTransactions(res.data);
-            setAccount(accRes.data);
+            fetchData();
             setShowUndoToast(false);
-
             setDeletedTransactionId(null);
         } catch (error) {
             console.error("Error restoring transaction:", error);
@@ -276,7 +342,8 @@ const AccountView = () => {
     const handleCancel = () => {
         setShowForm(false);
         setEditingTransaction(null);
-        const defaultCat = chartOfAccounts.length > 0 ? chartOfAccounts[0] : null;
+        const availableCats = chartOfAccounts.filter(c => c.id !== parseInt(id));
+        const defaultCat = availableCats.length > 0 ? availableCats[0] : null;
         setFormData({
             date: format(new Date(), 'yyyy-MM-dd'),
             payee: '',
@@ -301,6 +368,92 @@ const AccountView = () => {
         c.name.toLowerCase().includes(payeeInput.toLowerCase())
     );
 
+    const toggleSortOrder = () => {
+        setSortOrder(prev => prev === 'desc' ? 'asc' : 'desc');
+    };
+
+    // Sort transactions locally based on current state
+    const sortedTransactions = [...transactions].sort((a, b) => {
+        const dateA = new Date(a.date);
+        const dateB = new Date(b.date);
+        if (sortOrder === 'asc') {
+            // Oldest First: Date ASC, Sequence ASC
+            return dateA - dateB || a.sequence - b.sequence || a.id - b.id;
+        } else {
+            // Newest First: Date DESC, Sequence DESC
+            return dateB - dateA || b.sequence - a.sequence || b.id - a.id;
+        }
+    });
+
+    const handleDragEnd = async (event) => {
+        const { active, over } = event;
+
+        if (!over || active.id === over.id) {
+            return;
+        }
+
+        const oldIndex = sortedTransactions.findIndex(t => t.id === active.id);
+        const newIndex = sortedTransactions.findIndex(t => t.id === over.id);
+
+        const movedTx = sortedTransactions[oldIndex];
+        const targetTx = sortedTransactions[newIndex];
+
+        // Determine target date
+        // We take the date of the transaction we dropped onto
+        const targetDate = targetTx.date;
+        const movedDate = movedTx.date;
+
+        const isSameDate = format(new Date(targetDate), 'yyyy-MM-dd') === format(new Date(movedDate), 'yyyy-MM-dd');
+
+        if (!isSameDate) {
+            const confirmed = window.confirm(`Move transaction to ${format(new Date(targetDate), 'MMM d, yyyy')}?`);
+            if (!confirmed) return;
+        }
+
+        // Calculate Logical Index
+        // 1. Simulate the move in the current list
+        const newSortedList = arrayMove(sortedTransactions, oldIndex, newIndex);
+
+        // 2. Filter for the target date group
+        // Note: movedTx in newSortedList still has OLD date, but for calculation we treat it as having TARGET date
+        const targetDateStr = format(new Date(targetDate), 'yyyy-MM-dd');
+
+        const group = newSortedList.filter(t => {
+            const tDate = t.id === movedTx.id ? targetDate : t.date;
+            return format(new Date(tDate), 'yyyy-MM-dd') === targetDateStr;
+        });
+
+        // 3. Find index of movedTx in the group
+        const visualIndexInGroup = group.findIndex(t => t.id === movedTx.id);
+
+        // 4. Convert to Logical Index
+        // If ASC: Logical = Visual
+        // If DESC: Logical = (Length - 1) - Visual
+        let logicalIndex = visualIndexInGroup;
+        if (sortOrder === 'desc') {
+            logicalIndex = (group.length - 1) - visualIndexInGroup;
+        }
+
+        // Optimistic Update (Visual only, to prevent flicker)
+        setTransactions(prev => {
+            // We can't easily optimistically update the sequences without complex logic.
+            // So we'll just wait for the fetch.
+            // But we can update the date locally to make it look right immediately if we wanted.
+            return prev;
+        });
+
+        try {
+            await api.put(`/transactions/${movedTx.id}/reorder`, {
+                newDate: targetDate,
+                newIndex: logicalIndex
+            });
+            fetchData(); // Refresh to get new sequences
+        } catch (error) {
+            console.error("Error reordering:", error);
+            alert("Failed to reorder transaction");
+        }
+    };
+
     if (loading) return <div>Loading...</div>;
 
     return (
@@ -323,7 +476,8 @@ const AccountView = () => {
                     </button>
                     <button className="btn-primary flex items-center" onClick={() => {
                         setEditingTransaction(null);
-                        const defaultCat = chartOfAccounts.length > 0 ? chartOfAccounts[0] : null;
+                        const availableCats = chartOfAccounts.filter(c => c.id !== parseInt(id));
+                        const defaultCat = availableCats.length > 0 ? availableCats[0] : null;
                         setFormData({
                             date: format(new Date(), 'yyyy-MM-dd'),
                             payee: '',
@@ -591,64 +745,89 @@ const AccountView = () => {
 
             {/* Register Table */}
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-                <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50">
-                        <tr>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Payee / Description</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
-                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Payment</th>
-                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Deposit</th>
-                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Balance</th>
-                            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                        {(() => {
-                            let currentBalance = account ? parseFloat(account.balance) : 0;
-                            return transactions.map((tx) => {
-                                const runningBalance = currentBalance;
-                                // Calculate balance for next iteration (previous transaction in time)
-                                if (tx.type === 'Deposit') {
-                                    currentBalance -= tx.amount;
-                                } else {
-                                    currentBalance += tx.amount;
-                                }
+                <DndContext
+                    sensors={sensors}
+                    collisionDetection={closestCenter}
+                    onDragEnd={handleDragEnd}
+                >
+                    <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-50">
+                            <tr>
+                                <th className="px-2 py-3 w-8"></th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none" onClick={toggleSortOrder}>
+                                    <div className="flex items-center">
+                                        Date
+                                        {sortOrder === 'asc' ? <ChevronUp className="w-4 h-4 ml-1" /> : <ChevronDown className="w-4 h-4 ml-1" />}
+                                    </div>
+                                </th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Payee / Description</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
+                                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Payment</th>
+                                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Deposit</th>
+                                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Balance</th>
+                                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                            <SortableContext
+                                items={sortedTransactions.map(t => t.id)}
+                                strategy={verticalListSortingStrategy}
+                            >
+                                {(() => {
+                                    let currentBalance = account ? parseFloat(account.cachedBalance) : 0;
+                                    let startingBalance = 0;
 
-                                return (
-                                    <tr key={tx.id} className="hover:bg-gray-50 transition-colors">
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                            {format(new Date(tx.date), 'MMM d, yyyy')}
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap">
-                                            <div className="text-sm font-medium text-gray-900">{tx.payee}</div>
-                                            <div className="text-xs text-gray-500">{tx.description}</div>
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                            {tx.splits.length > 1 ? 'Split' : tx.splits[0]?.chartOfAccount?.name}
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium text-gray-900">
-                                            {tx.type === 'Payment' ? `$${tx.amount.toFixed(2)}` : '-'}
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium text-green-600">
-                                            {tx.type === 'Deposit' ? `$${tx.amount.toFixed(2)}` : '-'}
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-500">
-                                            ${runningBalance.toFixed(2)}
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2">
-                                            <button onClick={() => handleEditClick(tx)} className="text-indigo-600 hover:text-indigo-900">Edit</button>
-                                            <button onClick={() => handleDeleteClick(tx.id)} className="text-red-600 hover:text-red-900">
-                                                <Trash2 className="w-4 h-4" />
-                                            </button>
-                                        </td>
-                                    </tr>
-                                );
-                            });
-                        })()}
-                    </tbody>
+                                    if (sortOrder === 'asc') {
+                                        // Calculate starting balance for the list
+                                        // Starting Balance = Current Balance - (Sum of all transactions)
+                                        // Wait, "Current Balance" is the balance AFTER all transactions.
+                                        // So Starting Balance = End Balance - Net Change
+                                        const totalDeposits = sortedTransactions.reduce((sum, tx) => sum + (tx.type === 'Deposit' ? tx.amount : 0), 0);
+                                        const totalPayments = sortedTransactions.reduce((sum, tx) => sum + (tx.type === 'Payment' ? tx.amount : 0), 0);
+                                        const netChange = totalDeposits - totalPayments;
+                                        startingBalance = currentBalance - netChange;
+                                        currentBalance = startingBalance;
+                                    }
 
-                </table>
+                                    return sortedTransactions.map((tx) => {
+                                        let runningBalance;
+
+                                        if (sortOrder === 'asc') {
+                                            // Calculate balance for THIS transaction
+                                            if (tx.type === 'Deposit') {
+                                                currentBalance += tx.amount;
+                                            } else {
+                                                currentBalance -= tx.amount;
+                                            }
+                                            runningBalance = currentBalance;
+                                        } else {
+                                            // Descending (Newest First)
+                                            // Current balance is the balance AFTER this transaction
+                                            runningBalance = currentBalance;
+
+                                            // Prepare balance for next iteration (previous transaction in time)
+                                            if (tx.type === 'Deposit') {
+                                                currentBalance -= tx.amount;
+                                            } else {
+                                                currentBalance += tx.amount;
+                                            }
+                                        }
+
+                                        return (
+                                            <SortableRow
+                                                key={tx.id}
+                                                transaction={tx}
+                                                runningBalance={runningBalance}
+                                                onEdit={handleEditClick}
+                                                onDelete={handleDeleteClick}
+                                            />
+                                        );
+                                    });
+                                })()}
+                            </SortableContext>
+                        </tbody>
+                    </table>
+                </DndContext>
             </div>
         </div>
     );
