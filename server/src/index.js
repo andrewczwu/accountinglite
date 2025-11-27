@@ -35,8 +35,10 @@ const port = process.env.PORT || 3001;
 
 // Security Middleware
 app.use(helmet());
+const clientUrl = process.env.CLIENT_URL ? process.env.CLIENT_URL.replace(/\/$/, "") : 'http://localhost:5173';
+
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:5173', // Restrict to frontend
+  origin: clientUrl, // Restrict to frontend
   credentials: true
 }));
 
