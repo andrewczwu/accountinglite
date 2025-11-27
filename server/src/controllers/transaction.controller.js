@@ -25,7 +25,7 @@ const getTransactions = async (req, res) => {
             lines: { include: { account: true } },
             customer: true,
         },
-        orderBy: { date: 'desc' },
+        orderBy: [{ date: 'desc' }, { id: 'desc' }],
     });
 
     const transformed = transactions.map(tx => {

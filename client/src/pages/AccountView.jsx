@@ -406,24 +406,63 @@ const AccountView = () => {
                                 required
                             />
                             {showCategoryDropdown && (
-                                <div className="absolute z-10 w-full bg-white border border-gray-200 rounded-md shadow-lg max-h-48 overflow-auto mt-1">
-                                    {filteredCategories.map(cat => (
-                                        <div
-                                            key={cat.id}
-                                            className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-sm"
-                                            onClick={() => selectCategory(cat)}
-                                        >
-                                            {cat.name}
-                                        </div>
-                                    ))}
-                                    {filteredCategories.length === 0 && categoryInput && (
-                                        <div
-                                            className="px-4 py-2 hover:bg-blue-50 cursor-pointer text-sm text-blue-600 font-medium"
-                                            onClick={initiateCreateCategory}
-                                        >
-                                            + Create "{categoryInput}"
-                                        </div>
-                                    )}
+                                <div className="absolute z-10 w-full bg-white border border-gray-200 rounded-md shadow-lg max-h-60 overflow-auto mt-1">
+                                    {(() => {
+                                        // 1. Filter out current account
+                                        const available = filteredCategories.filter(c => c.id !== parseInt(id));
+
+                                        // 2. Group by Type
+                                        const grouped = available.reduce((acc, cat) => {
+                                            const type = cat.type || 'Other';
+                                            if (!acc[type]) acc[type] = [];
+                                            acc[type].push(cat);
+                                            return acc;
+                                        }, {});
+
+                                        // Order of types to display
+                                        const typeOrder = ['Expense', 'Income', 'Liability', 'Asset', 'Equity'];
+                                        const sortedTypes = Object.keys(grouped).sort((a, b) => {
+                                            const idxA = typeOrder.indexOf(a);
+                                            const idxB = typeOrder.indexOf(b);
+                                            if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+                                            if (idxA !== -1) return -1;
+                                            if (idxB !== -1) return 1;
+                                            return a.localeCompare(b);
+                                        });
+
+                                        if (available.length === 0 && !categoryInput) {
+                                            return <div className="px-4 py-2 text-sm text-gray-500">No categories found</div>;
+                                        }
+
+                                        return (
+                                            <>
+                                                {sortedTypes.map(type => (
+                                                    <div key={type}>
+                                                        <div className="px-4 py-1 bg-gray-100 text-xs font-bold text-gray-500 uppercase tracking-wider sticky top-0">
+                                                            {type}
+                                                        </div>
+                                                        {grouped[type].map(cat => (
+                                                            <div
+                                                                key={cat.id}
+                                                                className="px-4 py-2 hover:bg-gray-100 cursor-pointer text-sm pl-6"
+                                                                onClick={() => selectCategory(cat)}
+                                                            >
+                                                                {cat.name}
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                ))}
+                                                {available.length === 0 && categoryInput && (
+                                                    <div
+                                                        className="px-4 py-2 hover:bg-blue-50 cursor-pointer text-sm text-blue-600 font-medium border-t border-gray-100"
+                                                        onClick={initiateCreateCategory}
+                                                    >
+                                                        + Create "{categoryInput}"
+                                                    </div>
+                                                )}
+                                            </>
+                                        );
+                                    })()}
                                 </div>
                             )}
                         </div>
