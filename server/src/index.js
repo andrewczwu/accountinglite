@@ -4,16 +4,30 @@ const dotenv = require('dotenv');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const admin = require('firebase-admin');
-const serviceAccount = require('../serviceAccountKey.json');
+
 const verifyToken = require('./middleware/auth');
 
 dotenv.config();
 
 // Initialize Firebase Admin
 if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount)
-  });
+  let credential;
+  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+    // Production: Use environment variable
+    credential = admin.credential.cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT));
+  } else {
+    // Development: Use local file
+    try {
+      const serviceAccount = require('../serviceAccountKey.json');
+      credential = admin.credential.cert(serviceAccount);
+    } catch (error) {
+      console.error('Error loading serviceAccountKey.json:', error);
+    }
+  }
+
+  if (credential) {
+    admin.initializeApp({ credential });
+  }
 }
 
 const app = express();
@@ -22,7 +36,7 @@ const port = process.env.PORT || 3001;
 // Security Middleware
 app.use(helmet());
 app.use(cors({
-  origin: 'http://localhost:5173', // Restrict to frontend
+  origin: process.env.CLIENT_URL || 'http://localhost:5173', // Restrict to frontend
   credentials: true
 }));
 
