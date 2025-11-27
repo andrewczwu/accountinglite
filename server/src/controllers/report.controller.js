@@ -14,9 +14,9 @@ const getBalanceSheet = async (req, res) => {
     // acknowledging we might lose precision on very large numbers.
     // Ideally: acc.balance.toNumber()
 
-    const assets = accounts.filter(a => a.type === 'Asset').reduce((sum, acc) => sum + Number(acc.balance), 0);
-    const liabilities = accounts.filter(a => a.type === 'Liability').reduce((sum, acc) => sum + Number(acc.balance), 0);
-    const equity = accounts.filter(a => a.type === 'Equity').reduce((sum, acc) => sum + Number(acc.balance), 0);
+    const assets = accounts.filter(a => a.type === 'Asset').reduce((sum, acc) => sum + Number(acc.cachedBalance), 0);
+    const liabilities = accounts.filter(a => a.type === 'Liability').reduce((sum, acc) => sum + Number(acc.cachedBalance), 0);
+    const equity = accounts.filter(a => a.type === 'Equity').reduce((sum, acc) => sum + Number(acc.cachedBalance), 0);
 
     res.json({
         assets,

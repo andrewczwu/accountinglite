@@ -39,7 +39,7 @@ model Account {
   name         String
   type         String        // Asset, Liability, Equity, Income, Expense
   subtype      String?       // Bank, Credit Card, etc.
-  balance      Decimal       @default(0.0)
+  cachedBalance Decimal       @default(0.0)
   tenantId     Int
   tenant       Tenant        @relation(fields: [tenantId], references: [id])
   lines        TransactionLine[]

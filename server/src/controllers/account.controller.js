@@ -9,7 +9,7 @@ const getAccounts = async (req, res) => {
             subtype: { in: ['Bank', 'Credit Card'] }
         }
     });
-    res.json(accounts);
+    res.json(accounts.map(a => ({ ...a, balance: a.cachedBalance })));
 };
 
 const getAccount = async (req, res) => {
@@ -23,7 +23,7 @@ const getAccount = async (req, res) => {
             }
         });
         if (!account) return res.status(404).json({ error: 'Account not found' });
-        res.json(account);
+        res.json({ ...account, balance: account.cachedBalance });
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: 'Failed to fetch account' });
@@ -43,11 +43,11 @@ const createAccount = async (req, res) => {
                 name,
                 type: schemaType,
                 subtype: type,
-                balance: new Prisma.Decimal(balance || 0),
+                cachedBalance: new Prisma.Decimal(balance || 0),
                 tenantId: req.tenantId
             },
         });
-        res.json(account);
+        res.json({ ...account, balance: account.cachedBalance });
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: 'Failed to create account' });
@@ -79,7 +79,7 @@ const getChartOfAccounts = async (req, res) => {
             tenantId: req.tenantId,
         }
     });
-    res.json(coa);
+    res.json(coa.map(a => ({ ...a, balance: a.cachedBalance })));
 };
 
 const createChartOfAccount = async (req, res) => {
@@ -92,7 +92,7 @@ const createChartOfAccount = async (req, res) => {
             tenantId: req.tenantId
         }
     });
-    res.json(coa);
+    res.json({ ...coa, balance: coa.cachedBalance });
 };
 
 const updateChartOfAccount = async (req, res) => {
@@ -107,7 +107,7 @@ const updateChartOfAccount = async (req, res) => {
             },
             data: { name, type }
         });
-        res.json(coa);
+        res.json({ ...coa, balance: coa.cachedBalance });
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: 'Failed to update category' });
